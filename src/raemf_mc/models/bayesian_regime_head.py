@@ -124,8 +124,10 @@ class BayesianRegimeHead:
 
         def unpack(theta):
             idx = 0
-            log_tau = theta[:, idx : idx + n_classes]; idx += n_classes
-            beta = theta[:, idx : idx + p * n_classes].reshape(-1, p, n_classes); idx += p * n_classes
+            log_tau = theta[:, idx : idx + n_classes]
+            idx += n_classes
+            beta = theta[:, idx : idx + p * n_classes].reshape(-1, p, n_classes)
+            idx += p * n_classes
             intercept = theta[:, idx : idx + n_classes]
             return log_tau, beta, intercept
 
@@ -153,8 +155,6 @@ class BayesianRegimeHead:
             log_probability = torch.log_softmax(logits, dim=2)
             picked = log_probability.gather(2, y_tensor[None, :, None].expand(theta.shape[0], -1, -1)).squeeze(2)
             return (picked * w_tensor[None, :]).sum(dim=1) + prior
-
-        from raemf_mc.bayesian.torch_backend import _Approximation
 
         method = "fullrank_advi" if dim <= 150 else "meanfield_advi"
         self.fits = []

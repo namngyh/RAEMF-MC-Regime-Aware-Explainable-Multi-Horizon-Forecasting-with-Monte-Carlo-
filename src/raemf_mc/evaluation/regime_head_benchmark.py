@@ -25,7 +25,7 @@ from raemf_mc.calibration.temperature_scaling import apply_temperature, fit_temp
 from raemf_mc.config import write_config_snapshot
 from raemf_mc.data.loader import load_price_data, sha256_file
 from raemf_mc.evaluation.classification import evaluate_predictions
-from raemf_mc.evaluation.oos_distribution_benchmark import DistributionFold, make_distribution_folds
+from raemf_mc.evaluation.oos_distribution_benchmark import make_distribution_folds
 from raemf_mc.features.selection import select_features
 from raemf_mc.features.technical import build_features
 from raemf_mc.models.base import fill_features

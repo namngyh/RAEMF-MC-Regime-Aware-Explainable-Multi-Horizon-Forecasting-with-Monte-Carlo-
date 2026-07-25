@@ -13,7 +13,22 @@ def assert_no_future_feature_columns(feature_columns: list[str]) -> None:
     bad = sorted(set(feature_columns) & forbidden)
     if bad:
         raise AssertionError(f"Forward-looking columns used as features: {bad}")
-    bad_tokens = [c for c in feature_columns if c.startswith(("target_", "forward_return_", "future_mae_"))]
+    bad_tokens = [
+        c
+        for c in feature_columns
+        if c.startswith(
+            (
+                "target_",
+                "forward_return_",
+                "future_mae_",
+                "risk_off_",
+                "negative_terminal_",
+                "stress_path_",
+                "drawdown_5_",
+                "drawdown_10_",
+            )
+        )
+    ]
     if bad_tokens:
         raise AssertionError(f"Forbidden target-like feature columns: {bad_tokens}")
 

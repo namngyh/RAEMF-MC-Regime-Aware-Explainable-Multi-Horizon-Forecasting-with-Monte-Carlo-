@@ -226,6 +226,74 @@ Quy tắc baseline bất biến và thời điểm được phép chấm dự b�
 
 Các shell script tương ứng nằm trong `scripts/`.
 
+## CPU downside experiment — experimental, not production
+
+Nhánh thử nghiệm này bổ sung một binary Risk-off head nhưng không thay đổi ý
+nghĩa bốn lớp `Bull/Sideway/Bear/Stress`, production classifier EBM hoặc
+production scenario mode `point_estimate`. Baseline Risk-off luôn là
+`P(Bear) + P(Stress)`. Candidate chỉ được phép chuyển sang prospective shadow
+test nếu vượt toàn bộ acceptance criteria trên nested purged development OOS.
+Giai đoạn từ 2021-04-02 là `post-selection legacy audit`, không phải untouched
+holdout và không tham gia chọn model, feature, calibration hoặc threshold.
+
+Các profile Windows CPU:
+
+- `configs/cpu_smoke.yaml`: một horizon/một fold, xác minh code và artifact;
+- `configs/cpu_experiment.yaml`: ba horizon, nested purged CV, so sánh Logistic,
+  HistGradientBoosting và binary EBM theo nhóm feature;
+- `configs/cpu_final.yaml`: chỉ đọc quyết định đã khóa từ
+  `frozen_decision.json`, không tuning lại;
+- `configs/cpu_vb.yaml`: PyTorch mean-field ADVI trên CPU, là profile tham
+  chiếu riêng và không cần cho downside experiment mặc định.
+
+Cài đặt Windows CPU:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+
+# Chỉ cần khi chạy VB trên CPU; không kéo PyMC/ArviZ.
+python -m pip install -e ".[bayesian-core]"
+python -c "import torch; print(torch.cuda.is_available()); print(torch.get_num_threads())"
+```
+
+`torch.cuda.is_available() == False` là trạng thái bình thường của laptop CPU.
+PyMC/ArviZ chỉ cần cho NUTS validation nhỏ:
+`python -m pip install -e ".[bayesian-reference]"`. Extra `bayesian` cũ vẫn
+được giữ để tương thích ngược.
+
+Chạy một click:
+
+```bat
+run_cpu_smoke.bat
+run_cpu_experiment.bat
+run_cpu_final.bat
+run_shadow_update.bat
+```
+
+Hoặc chạy CLI:
+
+```bash
+python -m raemf_mc.cli downside-experiment --data VNINDEX_Daily.csv --config configs/cpu_experiment.yaml
+python -m raemf_mc.cli downside-report --run-dir outputs/experiments/downside_cpu/<run_id>
+python -m raemf_mc.cli shadow-update --data VNINDEX_Daily.csv --config configs/cpu_final.yaml
+```
+
+Mỗi run ghi vào
+`outputs/experiments/downside_cpu/<timestamp_gitsha>/`, gồm bảng metric theo
+fold/horizon, threshold curve, moving-block bootstrap, event FN/FP, feature
+ablation/importance, paper risk overlay, runtime/RAM và bốn hình
+`risk_off_cost_curve.png`, `risk_off_precision_recall_curve.png`,
+`risk_off_reliability.png`, `risk_off_oos_comparison.png`. Không ghi đè
+`outputs/latest/`. Forecast registry chỉ chấm sau khi có đủ `h` phiên tương lai
+và từ chối sửa các trường dự báo đã đăng ký.
+
+Đây là nghiên cứu mô hình và quản trị rủi ro, không phải khuyến nghị đầu tư.
+Smoke run chỉ xác minh khả năng thực thi; không phải bằng chứng candidate tốt
+hơn baseline.
+
 ## Cấu trúc repository
 
 ```text

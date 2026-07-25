@@ -49,9 +49,12 @@ def create_multihorizon_targets(
     return out
 
 
-def target_columns() -> list[str]:
+def target_columns(horizons: list[int] | None = None) -> list[str]:
     """Columns that must never be model features."""
+    from raemf_mc.targets.downside_targets import downside_target_columns
+
+    horizons = horizons or HORIZONS
     cols = ["target_sigma"]
-    for h in HORIZONS:
+    for h in horizons:
         cols += [f"forward_return_{h}", f"future_mae_{h}", f"target_{h}", f"target_end_date_{h}"]
-    return cols
+    return cols + downside_target_columns(horizons)

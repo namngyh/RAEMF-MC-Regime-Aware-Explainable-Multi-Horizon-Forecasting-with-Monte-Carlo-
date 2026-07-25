@@ -134,6 +134,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default="configs/laptop.yaml")
     p.add_argument("--output-dir", default="outputs/current_monitor")
     p.add_argument("--readme", default="README.md")
+    p = sub.add_parser(
+        "downside-experiment",
+        help="Chạy benchmark CPU nested-purged cho binary Risk-off head",
+    )
+    p.add_argument("--data", default="VNINDEX_Daily.csv")
+    p.add_argument("--config", default="configs/cpu_smoke.yaml")
+
+    p = sub.add_parser(
+        "downside-report",
+        help="Tạo lại báo cáo và biểu đồ từ artifact downside đã lưu",
+    )
+    p.add_argument("--run-dir", required=True)
+
+    p = sub.add_parser(
+        "shadow-update",
+        help="Ghi dự báo Risk-off bất biến và chấm các origin đã đủ horizon",
+    )
+    p.add_argument("--data", default="VNINDEX_Daily.csv")
+    p.add_argument("--config", default="configs/cpu_final.yaml")
+    p.add_argument("--registry", default="outputs/shadow_registry/forecast_registry.csv")
     return parser
 
 
@@ -272,6 +292,25 @@ def main(argv: list[str] | None = None) -> None:
         except Exception as exc:  # noqa: BLE001 - báo cáo chính đã xong, hình nghiên cứu không được chặn kết quả
             print(f"[CẢNH BÁO] Không vẽ lại được hình nghiên cứu: {exc}")
         print(output_dir / "report_for_nonspecialists.md")
+    elif args.cmd == "downside-experiment":
+        from raemf_mc.evaluation.downside_experiment import run_downside_experiment
+
+        output = run_downside_experiment(args.data, load_config(args.config))
+        print(output)
+    elif args.cmd == "downside-report":
+        from raemf_mc.reporting.downside_report import build_downside_report
+
+        output = build_downside_report(args.run_dir)
+        print(output)
+    elif args.cmd == "shadow-update":
+        from raemf_mc.evaluation.shadow_update import update_shadow_registry
+
+        output = update_shadow_registry(
+            args.data,
+            load_config(args.config),
+            registry_path=args.registry,
+        )
+        print(output)
 
 
 if __name__ == "__main__":

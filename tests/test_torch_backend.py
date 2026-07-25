@@ -8,10 +8,10 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from raemf_mc.bayesian import torch_backend
-from raemf_mc.bayesian.model import TorchVariationalScenarioModel
-from raemf_mc.bayesian.priors import ScenarioPriors
-from raemf_mc.bayesian.torch_backend import (
+from raemf_mc.bayesian import torch_backend  # noqa: E402
+from raemf_mc.bayesian.model import TorchVariationalScenarioModel  # noqa: E402
+from raemf_mc.bayesian.priors import ScenarioPriors  # noqa: E402
+from raemf_mc.bayesian.torch_backend import (  # noqa: E402
     TorchScenarioELBO,
     fit_torch_advi,
     pool_seed_results,

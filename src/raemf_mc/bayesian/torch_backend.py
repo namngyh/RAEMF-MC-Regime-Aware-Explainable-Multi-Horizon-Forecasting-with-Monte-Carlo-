@@ -100,18 +100,27 @@ class TorchScenarioELBO:
         p = self.priors
         idx = 0
         if p.hierarchical:
-            mu_global = theta[:, idx]; idx += 1
-            log_tau_mu = theta[:, idx]; idx += 1
-            mu_k = theta[:, idx : idx + K]; idx += K
-            log_c_global = theta[:, idx]; idx += 1
-            log_tau_c = theta[:, idx]; idx += 1
-            log_c_k = theta[:, idx : idx + K]; idx += K
+            mu_global = theta[:, idx]
+            idx += 1
+            log_tau_mu = theta[:, idx]
+            idx += 1
+            mu_k = theta[:, idx : idx + K]
+            idx += K
+            log_c_global = theta[:, idx]
+            idx += 1
+            log_tau_c = theta[:, idx]
+            idx += 1
+            log_c_k = theta[:, idx : idx + K]
+            idx += K
         else:
             mu_global = log_tau_mu = log_c_global = log_tau_c = None
-            mu_k = theta[:, idx : idx + K]; idx += K
-            log_c_k = theta[:, idx : idx + K]; idx += K
+            mu_k = theta[:, idx : idx + K]
+            idx += K
+            log_c_k = theta[:, idx : idx + K]
+            idx += K
         nu_dim = 1 if p.shared_nu else K
-        nu_raw = theta[:, idx : idx + nu_dim]; idx += nu_dim
+        nu_raw = theta[:, idx : idx + nu_dim]
+        idx += nu_dim
         nu_minus_two = torch.exp(torch.clamp(nu_raw, max=12.0))
         nu = 2.0 + nu_minus_two
         if p.shared_nu:

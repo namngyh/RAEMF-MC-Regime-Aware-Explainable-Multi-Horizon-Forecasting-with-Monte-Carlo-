@@ -40,7 +40,7 @@ DEFAULT_BAYESIAN_CONFIG: dict[str, Any] = {
     "fallback_to_meanfield": True,
 }
 
-VALID_BAYESIAN_BACKENDS = {"pymc", "pytorch_cuda"}
+VALID_BAYESIAN_BACKENDS = {"pymc", "pytorch_cpu", "pytorch_cuda"}
 
 
 def bayesian_config(config: dict[str, Any] | None = None) -> dict[str, Any]:

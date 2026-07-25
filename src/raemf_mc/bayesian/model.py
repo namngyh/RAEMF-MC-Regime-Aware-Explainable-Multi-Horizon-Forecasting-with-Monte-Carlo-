@@ -288,10 +288,13 @@ def create_scenario_model(config: dict[str, Any] | None = None):
     """Return the configured Bayesian scenario backend.
 
     ``bayesian.backend: pytorch_cuda`` (default in the VB configs) uses the
-    GPU-first PyTorch implementation; ``pymc`` keeps the reference backend.
+    GPU-first PyTorch implementation. ``pytorch_cpu`` uses the same
+    implementation without touching CUDA; ``pymc`` keeps the reference backend.
     """
     cfg = bayesian_config(config)
     backend = str(cfg.get("backend", "pymc"))
-    if backend in ("pytorch_cuda", "pytorch", "torch"):
+    if backend in ("pytorch_cuda", "pytorch_cpu", "pytorch", "torch"):
+        if backend == "pytorch_cpu":
+            cfg = {**cfg, "device": "cpu", "require_gpu": False}
         return TorchVariationalScenarioModel(cfg)
     return VariationalScenarioModel(cfg)
