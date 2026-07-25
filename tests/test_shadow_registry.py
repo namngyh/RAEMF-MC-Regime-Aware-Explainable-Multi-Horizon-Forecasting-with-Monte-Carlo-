@@ -56,4 +56,3 @@ def test_registry_is_immutable_and_scores_only_after_h_future_sessions(tmp_path)
 
     with pytest.raises(ValueError, match="mutation"):
         append_forecasts(path, _forecast(probability=0.9))
-

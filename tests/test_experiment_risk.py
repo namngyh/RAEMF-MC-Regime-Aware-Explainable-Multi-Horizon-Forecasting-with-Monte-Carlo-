@@ -64,4 +64,3 @@ def test_distribution_risk_metrics_cover_tail_and_calibration():
     assert result["var_95_exception_rate"] == 0.25
     assert result["effective_sample_size_min"] == 80.0
     assert result["tail_stability_range"] == pytest.approx(0.02)
-

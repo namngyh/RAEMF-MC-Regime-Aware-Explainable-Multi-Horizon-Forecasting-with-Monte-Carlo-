@@ -76,4 +76,3 @@ def test_calibration_and_single_class_fallback_are_deterministic(tmp_path):
     destination = model.save(tmp_path / "head.joblib")
     loaded = RiskOffHead.load(destination)
     np.testing.assert_allclose(model.predict_proba(features), loaded.predict_proba(features))
-

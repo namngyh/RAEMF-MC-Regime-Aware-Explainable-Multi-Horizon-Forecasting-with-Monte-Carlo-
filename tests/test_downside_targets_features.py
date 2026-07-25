@@ -68,4 +68,3 @@ def test_downside_features_do_not_change_when_only_future_data_changes():
     after, _ = build_downside_features(changed)
     pd.testing.assert_frame_equal(before.iloc[:90], after.iloc[:90])
     assert not any("target" in column or "future" in column for column in before.columns)
-
