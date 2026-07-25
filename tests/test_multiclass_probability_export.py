@@ -2,6 +2,10 @@ import numpy as np
 import pandas as pd
 
 from raemf_mc.evaluation.downside_experiment import _multiclass_probability_frame
+from raemf_mc.reporting.downside_report import (
+    _bear_confusion_summary,
+    _bear_interpretation,
+)
 
 
 def test_multiclass_probability_export_keeps_raw_and_calibrated_outputs():
@@ -53,3 +57,40 @@ def test_multiclass_probability_export_keeps_raw_and_calibrated_outputs():
     assert frame.loc[0, "baseline_risk_off_probability"] == 0.70
     assert frame.loc[0, "candidate_risk_off_alert"] == 1
     assert frame.loc[1, "actual_risk_off"] == 0
+
+
+def test_bear_report_summarizes_correct_and_confused_predictions():
+    probabilities = pd.DataFrame(
+        {
+            "horizon": [20, 20, 20, 40, 40],
+            "actual_class": ["Bear", "Bear", "Bull", "Bear", "Bear"],
+            "predicted_class": ["Bear", "Stress", "Bull", "Sideway", "Bull"],
+        }
+    )
+
+    summary = _bear_confusion_summary(probabilities)
+
+    assert summary.to_dict("records") == [
+        {
+            "horizon": 20,
+            "actual_bear": 2,
+            "predicted_bull": 0,
+            "predicted_sideway": 0,
+            "predicted_bear": 1,
+            "predicted_stress": 1,
+            "recall_bear": 0.5,
+        },
+        {
+            "horizon": 40,
+            "actual_bear": 2,
+            "predicted_bull": 1,
+            "predicted_sideway": 1,
+            "predicted_bear": 0,
+            "predicted_stress": 0,
+            "recall_bear": 0.0,
+        },
+    ]
+    interpretation = _bear_interpretation(summary)
+    assert "h20: 1/2" in interpretation
+    assert "h40: 0/2" in interpretation
+    assert "không xuất riêng `P(Bear)`" in interpretation

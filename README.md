@@ -246,11 +246,42 @@ kiện purge là `target_end_date_h < boundary`. Outer development OOS chỉ dù
 
 ### Kết quả full nested-purged OOS đã khóa
 
-Run đầy đủ: [`20260725_092011_48c19f4`](outputs/experiments/downside_cpu/20260725_092011_48c19f4/);
-[báo cáo chi tiết](outputs/experiments/downside_cpu/20260725_092011_48c19f4/report.md).
-Run dùng ba horizon, ba outer folds/horizon và seed 42. Các bảng metric,
-bootstrap, threshold, frozen decision và legacy audit tái lập byte-for-byte
-giữa hai lần chạy độc lập.
+Run đầy đủ: [`20260725_135758_6b5befe`](outputs/experiments/downside_cpu/20260725_135758_6b5befe/);
+[báo cáo chi tiết](outputs/experiments/downside_cpu/20260725_135758_6b5befe/report.md);
+[4.455 dòng xác suất OOS](outputs/experiments/downside_cpu/20260725_135758_6b5befe/multiclass_oos_probabilities.csv);
+[3.828 dòng xác suất legacy audit](outputs/experiments/downside_cpu/20260725_135758_6b5befe/legacy_multiclass_probabilities.csv).
+Run dùng ba horizon, ba outer folds/horizon và seed 42. Các bảng Risk-off
+metric, bootstrap, threshold, frozen decision và legacy audit trùng SHA-256
+với run trước; việc bổ sung export bốn lớp không làm thay đổi kết quả chọn
+mô hình.
+
+### Toàn bộ xác suất bốn lớp và chẩn đoán Bear
+
+Mỗi dòng trong `multiclass_oos_probabilities.csv` là một dự báo outer OOS,
+gồm ngày, horizon, fold, nhãn thực tế, nhãn argmax và cả xác suất raw lẫn
+temperature-calibrated cho `Bull`, `Sideway`, `Bear`, `Stress`. File cũng lưu
+xác suất/threshold/alert Risk-off của baseline và candidate. Có 1.491 dòng
+cho h20, 1.485 dòng cho h40 và 1.479 dòng cho h60; không có khóa
+`date-horizon-fold` trùng, không có giá trị thiếu và tổng bốn xác suất sai
+lệch khỏi 1 tối đa `4.44e-16`.
+
+| horizon | Bear thực tế | dự đoán Bull | Sideway | Bear đúng | Stress | recall Bear (95% CI) | precision Bear | PR-AUC Bear |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 144 | 44 | 34 | 15 | 51 | 0.1042 [0.0410, 0.1962] | 0.0765 | 0.0869 |
+| 40 | 160 | 57 | 60 | 2 | 41 | 0.0125 [0.0000, 0.0350] | 0.0263 | 0.0927 |
+| 60 | 134 | 37 | 53 | 9 | 35 | 0.0672 [0.0070, 0.1718] | 0.0464 | 0.0853 |
+
+![Chẩn đoán Bear OOS](outputs/experiments/downside_cpu/20260725_135758_6b5befe/figures/bear_oos_diagnostics.png)
+
+**Nhận xét:** EBM bốn lớp chỉ nhận đúng 15/144, 2/160 và 9/134 quan sát Bear
+OOS. Bear thường bị chuyển sang `Stress`, `Sideway` hoặc `Bull`; vì vậy chưa
+có bằng chứng rằng khả năng nhận diện Bear đã tốt hơn. Binary Risk-off
+candidate chỉ ước lượng `P(Bear hoặc Stress)`, không xuất riêng `P(Bear)` và
+không thể được dùng để khẳng định Bear đã cải thiện. Các recall cũ trong báo
+cáo production dùng giai đoạn/protocol khác, nên không so sánh trực tiếp;
+muốn đo cải thiện cần một candidate bốn lớp và đối chiếu paired trên đúng các
+fold OOS này. Khoảng tin cậy ở bảng trên dùng 300 moving-block bootstrap
+replicate, block length 20, hoàn toàn trên development OOS.
 
 | model | horizon | recall | precision | PR-AUC | Brier | ECE | expected cost | alert fraction |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -276,27 +307,27 @@ candidate trừ baseline có khoảng tin cậy 95% lần lượt là
 cho thấy suy giảm recall. Expected-cost difference ở cả ba horizon đều có
 khoảng tin cậy chứa 0.
 
-![So sánh Risk-off OOS](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_oos_comparison.png)
+![So sánh Risk-off OOS](outputs/experiments/downside_cpu/20260725_135758_6b5befe/figures/risk_off_oos_comparison.png)
 
 **Nhận xét:** Candidate tăng recall tại h20, gần ngang baseline tại h40 nhưng
 giảm mạnh ở h60. Expected cost chỉ giảm nhẹ ở h20/h40 và tăng rõ ở h60; do đó
 không có cải thiện ổn định theo horizon.
 
-![Đánh đổi precision–recall](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_precision_recall_curve.png)
+![Đánh đổi precision–recall](outputs/experiments/downside_cpu/20260725_135758_6b5befe/figures/risk_off_precision_recall_curve.png)
 
 **Nhận xét:** Baseline chiếm ưu thế trên phần lớn đường PR ở h20. Candidate có
 một vùng precision cao cục bộ ở h40/h60 nhưng không duy trì khi recall tăng;
 điểm threshold cuối cùng vẫn không đáp ứng đồng thời precision, recall và
 cost đã đăng ký trước.
 
-![Reliability Risk-off](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_reliability.png)
+![Reliability Risk-off](outputs/experiments/downside_cpu/20260725_135758_6b5befe/figures/risk_off_reliability.png)
 
 **Nhận xét:** ECE candidate lần lượt là 0.3066, 0.3173 và 0.3474, đều cao hơn
 baseline 0.2517, 0.2763 và 0.2957. Các điểm cách xa đường chéo cho thấy xác
 suất OOS chưa được hiệu chỉnh tốt; recall cao ở một số đoạn không bù được
 model risk này.
 
-![Chi phí theo threshold validation](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_cost_curve.png)
+![Chi phí theo threshold validation](outputs/experiments/downside_cpu/20260725_135758_6b5befe/figures/risk_off_cost_curve.png)
 
 **Nhận xét:** Hình chỉ dùng validation đã purge để mô tả lựa chọn threshold;
 outer test không được dùng để dịch chuyển điểm chọn. Đáy cost cục bộ thay đổi
@@ -305,14 +336,11 @@ sang shadow.
 
 ### Runtime laptop
 
-Full run là CPU-only, giới hạn bốn thread, peak RSS 328.4 MiB trên ngân sách
-6 GiB. Tổng CPU-time theo stage là 6,956 giây (khoảng 1 giờ 56 phút). Wall
-time quan sát là 11,446 giây (3 giờ 10 phút), nhưng h20/fold 0 ghi 5,670 giây
-wall so với 658 giây CPU do máy sleep/suspend hoặc idle; vì vậy đây không phải
-wall benchmark sạch. Tổng wall time của các stage không bị cờ là khoảng 5,773
-giây, nhưng không đại diện cho một full run hoàn chỉnh. Smoke run sạch
-[`20260725_123555_5a38412`](outputs/experiments/downside_cpu/20260725_123555_5a38412/)
-mất 34.05 giây và peak RSS 279.4 MiB.
+Full run sạch là CPU-only, giới hạn bốn thread, wall time 3.347,31 giây
+(55 phút 47 giây), CPU-time theo stage 3.955,31 giây và peak RSS 356,6 MiB trên
+ngân sách 6 GiB. Không stage nào bị gắn cờ sleep/suspend. Smoke run từ cùng
+commit [`20260725_135640_6b5befe`](outputs/experiments/downside_cpu/20260725_135640_6b5befe/)
+mất 32,63 giây và peak RSS 279,2 MiB.
 
 Kết luận thực dụng: laptop chạy được full distribution OOS về RAM và CPU.
 Nên cắm nguồn, giữ tối đa bốn thread và tắt sleep trong lúc chạy; thời gian
@@ -365,10 +393,12 @@ python -m raemf_mc.cli shadow-update --data VNINDEX_Daily.csv --config configs/c
 
 Mỗi run ghi vào
 `outputs/experiments/downside_cpu/<timestamp_gitsha>/`, gồm bảng metric theo
-fold/horizon, threshold curve, moving-block bootstrap, event FN/FP, feature
-ablation/importance, paper risk overlay, runtime/RAM và bốn hình
+fold/horizon, toàn bộ xác suất raw/calibrated bốn lớp, confusion matrix,
+bootstrap theo lớp, threshold curve, event FN/FP, feature ablation/importance,
+paper risk overlay, runtime/RAM và năm hình
 `risk_off_cost_curve.png`, `risk_off_precision_recall_curve.png`,
-`risk_off_reliability.png`, `risk_off_oos_comparison.png`. Không ghi đè
+`risk_off_reliability.png`, `risk_off_oos_comparison.png` và
+`bear_oos_diagnostics.png`. Không ghi đè
 `outputs/latest/`. Forecast registry chỉ chấm sau khi có đủ `h` phiên tương lai
 và từ chối sửa các trường dự báo đã đăng ký.
 

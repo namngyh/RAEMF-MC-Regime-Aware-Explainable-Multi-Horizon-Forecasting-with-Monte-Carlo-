@@ -235,6 +235,52 @@ def _plot_bear_bootstrap(bootstrap: pd.DataFrame, figures: Path) -> None:
     _save(fig, figures / "bear_oos_diagnostics.png")
 
 
+def _bear_confusion_summary(probabilities: pd.DataFrame) -> pd.DataFrame:
+    required = {"horizon", "actual_class", "predicted_class"}
+    if probabilities.empty or not required.issubset(probabilities.columns):
+        return pd.DataFrame()
+    bear = probabilities[probabilities["actual_class"] == "Bear"]
+    if bear.empty:
+        return pd.DataFrame()
+    classes = ["Bull", "Sideway", "Bear", "Stress"]
+    counts = (
+        pd.crosstab(bear["horizon"], bear["predicted_class"])
+        .reindex(columns=classes, fill_value=0)
+        .rename(columns=lambda value: f"predicted_{str(value).lower()}")
+    )
+    counts.insert(0, "actual_bear", counts.sum(axis=1))
+    counts["recall_bear"] = (
+        counts["predicted_bear"] / counts["actual_bear"].clip(lower=1)
+    )
+    return counts.reset_index()
+
+
+def _bear_interpretation(confusion: pd.DataFrame) -> str:
+    if confusion.empty:
+        return (
+            "**Nhận xét:** Không đủ quan sát Bear OOS để mô tả confusion. "
+            "Không dùng legacy audit để tuning hoặc khẳng định cải thiện."
+        )
+    ratios = "; ".join(
+        f"h{int(row.horizon)}: {int(row.predicted_bear)}/{int(row.actual_bear)}"
+        for row in confusion.itertuples(index=False)
+    )
+    uniformly_low = bool((confusion["recall_bear"] < 0.25).all())
+    assessment = (
+        "Recall Bear thấp ở mọi horizon trong run này."
+        if uniformly_low
+        else "Recall Bear không đồng đều giữa các horizon trong run này."
+    )
+    return (
+        f"**Nhận xét:** Số Bear nhận đúng/số Bear thực tế là {ratios}. "
+        f"{assessment} Các quan sát còn lại bị chuyển sang Bull, Sideway hoặc Stress. "
+        "Binary Risk-off head chỉ ước lượng `P(Bear hoặc Stress)`, không xuất riêng "
+        "`P(Bear)` nên không chứng minh Bear đã cải thiện. Khoảng tin cậy dùng "
+        "moving-block bootstrap trên development OOS; legacy audit không tham gia "
+        "tuning hay kết luận cải thiện."
+    )
+
+
 def _acceptance_text(risk: dict[str, object]) -> str:
     acceptance = risk.get("acceptance", {})
     if not isinstance(acceptance, dict):
@@ -321,6 +367,7 @@ def build_downside_report(run_dir: str | Path) -> Path:
         if not multiclass_bootstrap.empty
         else pd.DataFrame()
     )
+    bear_confusion = _bear_confusion_summary(multiclass_probabilities)
 
     summary_columns = [
         column
@@ -370,15 +417,17 @@ def build_downside_report(run_dir: str | Path) -> Path:
         if not multiclass_summary.empty
         else "_not_available_",
         "",
+        markdown_table(bear_confusion, max_rows=20)
+        if not bear_confusion.empty
+        else "_not_available_",
+        "",
         markdown_table(bear_bootstrap, max_rows=20)
         if not bear_bootstrap.empty
         else "_not_available_",
         "",
         "![Bear-specific OOS](figures/bear_oos_diagnostics.png)",
         "",
-        "**Nhận xét:** Bear được đọc từ `actual_class == Bear` và quyết định argmax "
-        "bốn lớp. Khoảng tin cậy dùng moving-block bootstrap trên development OOS; "
-        "không dùng legacy audit để tuning hoặc khẳng định cải thiện.",
+        _bear_interpretation(bear_confusion),
         "",
         "## 3. Tác động của Risk-off head",
         "",

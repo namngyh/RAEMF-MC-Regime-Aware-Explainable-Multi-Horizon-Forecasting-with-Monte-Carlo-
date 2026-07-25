@@ -15,6 +15,30 @@ Baseline Risk-off được giữ nguyên là `P(Bear) + P(Stress)` từ EBM bố
 | candidate_risk_off | 20 | 0.2885 | 0.2483 | 0.2512 | 0.2903 | 0.2986 | 0.0650 | 0.3038 |
 | multiclass_probability_sum | 20 | 0.4154 | 0.2348 | 0.2270 | 0.2495 | 0.2276 | 0.0582 | 0.4628 |
 
+### Xác suất đầy đủ và nhận diện Bear
+
+Artifact `multiclass_oos_probabilities.csv` có 994 dòng OOS. Mỗi dòng lưu đủ xác suất raw và temperature-calibrated cho `Bull/Sideway/Bear/Stress`, actual/predicted class, xác suất Risk-off baseline/candidate, threshold và alert. Các target downside còn lại là nhãn nghiên cứu, không được trình bày như xác suất nếu chưa fit head riêng.
+
+| model | horizon | macro_f1 | balanced_accuracy | recall_bear | recall_stress | brier | ece |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| multiclass_ebm_baseline | 20 | 0.2520 | 0.2538 | 0.1354 | 0.2317 | 0.7449 | 0.0187 |
+
+| horizon | actual_bear | predicted_bull | predicted_sideway | predicted_bear | predicted_stress | recall_bear |
+| --- | --- | --- | --- | --- | --- | --- |
+| 20.0000 | 96.0000 | 30.0000 | 31.0000 | 13.0000 | 22.0000 | 0.1354 |
+
+| horizon | class | metric | estimate | ci_low | ci_high | support | replicates | block_length |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 20 | Bear | recall | 0.1354 | 0.0465 | 0.2324 | 96 | 50 | 20 |
+| 20 | Bear | precision | 0.1354 | 0.0691 | 0.2411 | 96 | 50 | 20 |
+| 20 | Bear | f1 | 0.1354 | 0.0618 | 0.2232 | 96 | 50 | 20 |
+| 20 | Bear | pr_auc | 0.1095 | 0.0808 | 0.1684 | 96 | 50 | 20 |
+| 20 | Bear | brier | 0.1072 | 0.0891 | 0.1251 | 96 | 50 | 20 |
+
+![Bear-specific OOS](figures/bear_oos_diagnostics.png)
+
+**Nhận xét:** Số Bear nhận đúng/số Bear thực tế là h20: 13/96. Recall Bear thấp ở mọi horizon trong run này. Các quan sát còn lại bị chuyển sang Bull, Sideway hoặc Stress. Binary Risk-off head chỉ ước lượng `P(Bear hoặc Stress)`, không xuất riêng `P(Bear)` nên không chứng minh Bear đã cải thiện. Khoảng tin cậy dùng moving-block bootstrap trên development OOS; legacy audit không tham gia tuning hay kết luận cải thiện.
+
 ## 3. Tác động của Risk-off head
 
 ![So sánh Risk-off OOS](figures/risk_off_oos_comparison.png)
@@ -108,8 +132,8 @@ Overlay chỉ là paper overlay, dùng vị thế trễ một phiên và notiona
 
 | stage | horizon | fold | wall_time | cpu_time | peak_rss | peak_python_bytes | cache_status | thread_count |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| load_and_targets | nan | nan | 16.0427 | 15.9375 | 242081792 | 9082047 | targets:miss;features:hit | 2 |
-| outer_fold | 20.0000 | 0.0000 | 17.8546 | 18.0156 | 292974592 | 51440940 | fold_indices:miss;hmm_egarch:hit | 2 |
+| load_and_targets | nan | nan | 13.5509 | 13.4375 | 242102272 | 8972991 | targets:hit;features:hit | 2 |
+| outer_fold | 20.0000 | 0.0000 | 18.3773 | 18.6719 | 292716544 | 51494535 | fold_indices:hit;hmm_egarch:hit | 2 |
 
 Không phát hiện stage có wall time lớn hơn 4 lần CPU time.
 

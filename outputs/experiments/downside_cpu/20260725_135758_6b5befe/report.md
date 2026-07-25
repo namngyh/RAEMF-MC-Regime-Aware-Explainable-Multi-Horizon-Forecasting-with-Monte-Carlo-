@@ -19,6 +19,44 @@ Baseline Risk-off được giữ nguyên là `P(Bear) + P(Stress)` từ EBM bố
 | multiclass_probability_sum | 40 | 0.9192 | 0.2559 | 0.2548 | 0.2686 | 0.2763 | 0.0471 | 0.8916 |
 | multiclass_probability_sum | 60 | 0.9299 | 0.2337 | 0.2275 | 0.2728 | 0.2957 | 0.0578 | 0.9175 |
 
+### Xác suất đầy đủ và nhận diện Bear
+
+Artifact `multiclass_oos_probabilities.csv` có 4455 dòng OOS. Mỗi dòng lưu đủ xác suất raw và temperature-calibrated cho `Bull/Sideway/Bear/Stress`, actual/predicted class, xác suất Risk-off baseline/candidate, threshold và alert. Các target downside còn lại là nhãn nghiên cứu, không được trình bày như xác suất nếu chưa fit head riêng.
+
+| model | horizon | macro_f1 | balanced_accuracy | recall_bear | recall_stress | brier | ece |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| multiclass_ebm_baseline | 20 | 0.2051 | 0.2281 | 0.1116 | 0.3073 | 0.7646 | 0.1129 |
+| multiclass_ebm_baseline | 40 | 0.2296 | 0.2584 | 0.0118 | 0.3971 | 0.7754 | 0.1784 |
+| multiclass_ebm_baseline | 60 | 0.2464 | 0.2935 | 0.0942 | 0.3975 | 0.7722 | 0.1935 |
+
+| horizon | actual_bear | predicted_bull | predicted_sideway | predicted_bear | predicted_stress | recall_bear |
+| --- | --- | --- | --- | --- | --- | --- |
+| 20.0000 | 144.0000 | 44.0000 | 34.0000 | 15.0000 | 51.0000 | 0.1042 |
+| 40.0000 | 160.0000 | 57.0000 | 60.0000 | 2.0000 | 41.0000 | 0.0125 |
+| 60.0000 | 134.0000 | 37.0000 | 53.0000 | 9.0000 | 35.0000 | 0.0672 |
+
+| horizon | class | metric | estimate | ci_low | ci_high | support | replicates | block_length |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 20 | Bear | recall | 0.1042 | 0.0410 | 0.1962 | 144 | 300 | 20 |
+| 20 | Bear | precision | 0.0765 | 0.0334 | 0.1373 | 144 | 300 | 20 |
+| 20 | Bear | f1 | 0.0882 | 0.0373 | 0.1527 | 144 | 300 | 20 |
+| 20 | Bear | pr_auc | 0.0869 | 0.0600 | 0.1282 | 144 | 300 | 20 |
+| 20 | Bear | brier | 0.1082 | 0.0935 | 0.1272 | 144 | 300 | 20 |
+| 40 | Bear | recall | 0.0125 | 0.0000 | 0.0350 | 160 | 300 | 20 |
+| 40 | Bear | precision | 0.0263 | 0.0000 | 0.0759 | 160 | 300 | 20 |
+| 40 | Bear | f1 | 0.0169 | 0.0000 | 0.0478 | 160 | 300 | 20 |
+| 40 | Bear | pr_auc | 0.0927 | 0.0555 | 0.1358 | 160 | 300 | 20 |
+| 40 | Bear | brier | 0.1109 | 0.0798 | 0.1444 | 160 | 300 | 20 |
+| 60 | Bear | recall | 0.0672 | 0.0070 | 0.1718 | 134 | 300 | 20 |
+| 60 | Bear | precision | 0.0464 | 0.0044 | 0.1003 | 134 | 300 | 20 |
+| 60 | Bear | f1 | 0.0549 | 0.0059 | 0.1219 | 134 | 300 | 20 |
+| 60 | Bear | pr_auc | 0.0853 | 0.0490 | 0.1315 | 134 | 300 | 20 |
+| 60 | Bear | brier | 0.1007 | 0.0701 | 0.1367 | 134 | 300 | 20 |
+
+![Bear-specific OOS](figures/bear_oos_diagnostics.png)
+
+**Nhận xét:** Số Bear nhận đúng/số Bear thực tế là h20: 15/144; h40: 2/160; h60: 9/134. Recall Bear thấp ở mọi horizon trong run này. Các quan sát còn lại bị chuyển sang Bull, Sideway hoặc Stress. Binary Risk-off head chỉ ước lượng `P(Bear hoặc Stress)`, không xuất riêng `P(Bear)` nên không chứng minh Bear đã cải thiện. Khoảng tin cậy dùng moving-block bootstrap trên development OOS; legacy audit không tham gia tuning hay kết luận cải thiện.
+
 ## 3. Tác động của Risk-off head
 
 ![So sánh Risk-off OOS](figures/risk_off_oos_comparison.png)
@@ -131,23 +169,21 @@ Overlay chỉ là paper overlay, dùng vị thế trễ một phiên và notiona
 
 | stage | horizon | fold | wall_time | cpu_time | peak_rss | peak_python_bytes | cache_status | thread_count |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| load_and_targets | nan | nan | 13.8505 | 13.7812 | 241508352 | 9439730 | targets:hit;features:hit | 4 |
-| outer_fold | 20.0000 | 0.0000 | 5670.1613 | 657.5312 | 314277888 | 63039504 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 20.0000 | 1.0000 | 1234.7021 | 1311.9531 | 328028160 | 66941003 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 20.0000 | 2.0000 | 1161.4508 | 1174.1875 | 330850304 | 72001830 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 40.0000 | 0.0000 | 921.5446 | 926.7188 | 330850304 | 61463260 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 40.0000 | 1.0000 | 653.3247 | 692.9844 | 330850304 | 66418105 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 40.0000 | 2.0000 | 717.1672 | 812.4844 | 330850304 | 71612259 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 60.0000 | 0.0000 | 306.7559 | 414.3281 | 330850304 | 61032557 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 60.0000 | 1.0000 | 319.4822 | 429.3906 | 330850304 | 66019686 | fold_indices:miss;hmm_egarch:hit | 4 |
-| outer_fold | 60.0000 | 2.0000 | 304.0942 | 351.6094 | 330850304 | 71010076 | fold_indices:miss;hmm_egarch:hit | 4 |
-| post_selection_legacy_audit | nan | nan | 141.0926 | 171.0938 | 344346624 | 59250875 | not_applicable | 4 |
+| load_and_targets | nan | nan | 13.4063 | 13.3594 | 242388992 | 9439114 | targets:hit;features:hit | 4 |
+| outer_fold | 20.0000 | 0.0000 | 273.0104 | 317.6562 | 314781696 | 63072420 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 20.0000 | 1.0000 | 332.9595 | 462.2031 | 328675328 | 67017673 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 20.0000 | 2.0000 | 310.8261 | 359.9375 | 339152896 | 72117672 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 40.0000 | 0.0000 | 275.8474 | 322.3125 | 339152896 | 61541856 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 40.0000 | 1.0000 | 291.0367 | 339.1406 | 339152896 | 66501896 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 40.0000 | 2.0000 | 325.0271 | 436.0781 | 348954624 | 71555564 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 60.0000 | 0.0000 | 296.6915 | 400.7969 | 348954624 | 60931290 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 60.0000 | 1.0000 | 695.9118 | 733.6562 | 348954624 | 65941035 | fold_indices:hit;hmm_egarch:hit | 4 |
+| outer_fold | 60.0000 | 2.0000 | 385.7094 | 407.1719 | 354332672 | 71132908 | fold_indices:hit;hmm_egarch:hit | 4 |
+| post_selection_legacy_audit | nan | nan | 136.1045 | 163.0000 | 373919744 | 60140077 | not_applicable | 4 |
 
-Có stage có wall time lớn hơn 4 lần CPU time; số đo này có thể bao gồm thời gian máy sleep/suspend hoặc idle kéo dài, nên không phải benchmark wall sạch.
+Không phát hiện stage có wall time lớn hơn 4 lần CPU time.
 
-| stage | horizon | fold | wall_time | cpu_time |
-| --- | --- | --- | --- | --- |
-| outer_fold | 20.0000 | 0.0000 | 5670.1613 | 657.5312 |
+
 
 Runner downside không gọi CUDA. `peak_rss=not_available` nghĩa là môi trường thiếu psutil; `peak_python_bytes` vẫn được ghi và giới hạn này phải được nêu rõ.
 
