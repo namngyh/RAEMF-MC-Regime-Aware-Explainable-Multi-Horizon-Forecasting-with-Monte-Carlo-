@@ -236,6 +236,88 @@ test nếu vượt toàn bộ acceptance criteria trên nested purged developmen
 Giai đoạn từ 2021-04-02 là `post-selection legacy audit`, không phải untouched
 holdout và không tham gia chọn model, feature, calibration hoặc threshold.
 
+Kiến trúc downside tạo năm target nhị phân không loại trừ nhau:
+`risk_off`, `negative_terminal`, `stress_path`, `drawdown5` và `drawdown10`.
+Risk-off head thử Logistic, HistGradientBoosting và binary EBM, có
+severity/frequency/cost weighting. Mọi quyết định model, nhóm feature,
+calibration và threshold đều nằm trong inner purged CV; với mỗi horizon, điều
+kiện purge là `target_end_date_h < boundary`. Outer development OOS chỉ dùng để
+đánh giá. Test/legacy audit không được dùng để tuning.
+
+### Kết quả full nested-purged OOS đã khóa
+
+Run đầy đủ: [`20260725_092011_48c19f4`](outputs/experiments/downside_cpu/20260725_092011_48c19f4/);
+[báo cáo chi tiết](outputs/experiments/downside_cpu/20260725_092011_48c19f4/report.md).
+Run dùng ba horizon, ba outer folds/horizon và seed 42. Các bảng metric,
+bootstrap, threshold, frozen decision và legacy audit tái lập byte-for-byte
+giữa hai lần chạy độc lập.
+
+| model | horizon | recall | precision | PR-AUC | Brier | ECE | expected cost | alert fraction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Binary Risk-off candidate | 20 | 0.7654 | 0.2211 | 0.2331 | 0.2913 | 0.3066 | 0.0446 | 0.8256 |
+| Baseline `P(Bear)+P(Stress)` | 20 | 0.6579 | 0.2286 | 0.2952 | 0.2577 | 0.2517 | 0.0475 | 0.7109 |
+| Binary Risk-off candidate | 40 | 0.9311 | 0.2402 | 0.2582 | 0.2919 | 0.3173 | 0.0469 | 0.9636 |
+| Baseline `P(Bear)+P(Stress)` | 40 | 0.9192 | 0.2559 | 0.2548 | 0.2686 | 0.2763 | 0.0471 | 0.8916 |
+| Binary Risk-off candidate | 60 | 0.7154 | 0.2841 | 0.2320 | 0.2977 | 0.3474 | 0.0681 | 0.7025 |
+| Baseline `P(Bear)+P(Stress)` | 60 | 0.9299 | 0.2337 | 0.2275 | 0.2728 | 0.2957 | 0.0578 | 0.9175 |
+
+**Kết luận acceptance:** `inconclusive_or_rejected`, đạt 3/10 kiểm tra đã
+đăng ký trước. Trung bình theo horizon, recall candidate thấp hơn baseline
+3.17 điểm phần trăm; precision 24.85% chưa đạt sàn 25%; PR-AUC giảm 0.0181;
+expected cost tăng 4.74%; Brier xấu hơn 0.0272. Candidate chỉ tăng recall ở
+3/9 fold, dưới yêu cầu 6/9. Chỉ các kiểm tra bảo toàn macro F1 bốn lớp,
+CPU-only và giới hạn RAM đạt. Vì vậy `cpu_final` và prospective shadow update
+không được kích hoạt; production classifier và scenario mode vẫn giữ nguyên.
+
+Moving-block bootstrap không hỗ trợ candidate ở horizon nào. Chênh recall
+candidate trừ baseline có khoảng tin cậy 95% lần lượt là
+`[-0.0183, 0.2173]` ở h20, `[-0.0733, 0.0731]` ở h40 và
+`[-0.4035, -0.0608]` ở h60. Hai horizon đầu chưa phân biệt được khỏi 0; h60
+cho thấy suy giảm recall. Expected-cost difference ở cả ba horizon đều có
+khoảng tin cậy chứa 0.
+
+![So sánh Risk-off OOS](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_oos_comparison.png)
+
+**Nhận xét:** Candidate tăng recall tại h20, gần ngang baseline tại h40 nhưng
+giảm mạnh ở h60. Expected cost chỉ giảm nhẹ ở h20/h40 và tăng rõ ở h60; do đó
+không có cải thiện ổn định theo horizon.
+
+![Đánh đổi precision–recall](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_precision_recall_curve.png)
+
+**Nhận xét:** Baseline chiếm ưu thế trên phần lớn đường PR ở h20. Candidate có
+một vùng precision cao cục bộ ở h40/h60 nhưng không duy trì khi recall tăng;
+điểm threshold cuối cùng vẫn không đáp ứng đồng thời precision, recall và
+cost đã đăng ký trước.
+
+![Reliability Risk-off](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_reliability.png)
+
+**Nhận xét:** ECE candidate lần lượt là 0.3066, 0.3173 và 0.3474, đều cao hơn
+baseline 0.2517, 0.2763 và 0.2957. Các điểm cách xa đường chéo cho thấy xác
+suất OOS chưa được hiệu chỉnh tốt; recall cao ở một số đoạn không bù được
+model risk này.
+
+![Chi phí theo threshold validation](outputs/experiments/downside_cpu/20260725_092011_48c19f4/figures/risk_off_cost_curve.png)
+
+**Nhận xét:** Hình chỉ dùng validation đã purge để mô tả lựa chọn threshold;
+outer test không được dùng để dịch chuyển điểm chọn. Đáy cost cục bộ thay đổi
+theo horizon, đặc biệt ở h60, cho thấy threshold không ổn định đủ để chuyển
+sang shadow.
+
+### Runtime laptop
+
+Full run là CPU-only, giới hạn bốn thread, peak RSS 328.4 MiB trên ngân sách
+6 GiB. Tổng CPU-time theo stage là 6,956 giây (khoảng 1 giờ 56 phút). Wall
+time quan sát là 11,446 giây (3 giờ 10 phút), nhưng h20/fold 0 ghi 5,670 giây
+wall so với 658 giây CPU do máy sleep/suspend hoặc idle; vì vậy đây không phải
+wall benchmark sạch. Tổng wall time của các stage không bị cờ là khoảng 5,773
+giây, nhưng không đại diện cho một full run hoàn chỉnh. Smoke run sạch
+[`20260725_123555_5a38412`](outputs/experiments/downside_cpu/20260725_123555_5a38412/)
+mất 34.05 giây và peak RSS 279.4 MiB.
+
+Kết luận thực dụng: laptop chạy được full distribution OOS về RAM và CPU.
+Nên cắm nguồn, giữ tối đa bốn thread và tắt sleep trong lúc chạy; thời gian
+thực tế có thể ở mức vài giờ tùy power/thermal throttling và trạng thái cache.
+
 Các profile Windows CPU:
 
 - `configs/cpu_smoke.yaml`: một horizon/một fold, xác minh code và artifact;

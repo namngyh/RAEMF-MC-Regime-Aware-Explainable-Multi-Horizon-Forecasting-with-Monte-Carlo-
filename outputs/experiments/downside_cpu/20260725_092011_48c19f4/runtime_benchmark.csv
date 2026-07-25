@@ -1,0 +1,12 @@
+stage,horizon,fold,wall_time,cpu_time,peak_rss,peak_python_bytes,cache_status,thread_count
+load_and_targets,,,13.850457099964842,13.78125,241508352,9439730,targets:hit;features:hit,4
+outer_fold,20.0,0.0,5670.161252699967,657.53125,314277888,63039504,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,20.0,1.0,1234.7020548,1311.953125,328028160,66941003,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,20.0,2.0,1161.4508302000468,1174.1875,330850304,72001830,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,40.0,0.0,921.544567600009,926.71875,330850304,61463260,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,40.0,1.0,653.3246982999844,692.984375,330850304,66418105,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,40.0,2.0,717.1671691999654,812.484375,330850304,71612259,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,60.0,0.0,306.7559060000349,414.328125,330850304,61032557,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,60.0,1.0,319.4821516999509,429.390625,330850304,66019686,fold_indices:miss;hmm_egarch:hit,4
+outer_fold,60.0,2.0,304.09420110000065,351.609375,330850304,71010076,fold_indices:miss;hmm_egarch:hit,4
+post_selection_legacy_audit,,,141.0925689000287,171.09375,344346624,59250875,not_applicable,4
