@@ -196,6 +196,45 @@ def _plot_fold_metrics(metrics: pd.DataFrame, figures: Path) -> None:
     _save(fig, figures / "risk_off_oos_comparison.png")
 
 
+def _plot_bear_bootstrap(bootstrap: pd.DataFrame, figures: Path) -> None:
+    if bootstrap.empty:
+        return
+    bear = bootstrap[
+        (bootstrap["class"] == "Bear")
+        & (bootstrap["metric"].isin(["recall", "precision", "pr_auc"]))
+    ]
+    if bear.empty:
+        return
+    metrics = ["recall", "precision", "pr_auc"]
+    titles = {
+        "recall": "Recall Bear",
+        "precision": "Precision Bear",
+        "pr_auc": "PR-AUC Bear one-vs-rest",
+    }
+    fig, axes = plt.subplots(1, len(metrics), figsize=(12, 3.8))
+    for axis, metric in zip(axes, metrics, strict=True):
+        frame = bear[bear["metric"] == metric].sort_values("horizon")
+        estimate = frame["estimate"].to_numpy(dtype=float)
+        lower = estimate - frame["ci_low"].to_numpy(dtype=float)
+        upper = frame["ci_high"].to_numpy(dtype=float) - estimate
+        axis.errorbar(
+            frame["horizon"],
+            estimate,
+            yerr=np.vstack([lower, upper]),
+            color="#E69F00",
+            marker="o",
+            capsize=4,
+        )
+        axis.set(
+            title=titles[metric],
+            xlabel="Horizon",
+            ylabel="Ước lượng OOS",
+            ylim=(0, 1),
+        )
+    fig.suptitle("Bear-specific nested OOS với moving-block CI 95%", fontweight="bold")
+    _save(fig, figures / "bear_oos_diagnostics.png")
+
+
 def _acceptance_text(risk: dict[str, object]) -> str:
     acceptance = risk.get("acceptance", {})
     if not isinstance(acceptance, dict):
@@ -222,6 +261,11 @@ def build_downside_report(run_dir: str | Path) -> Path:
     curve = _read_csv(run_dir / "risk_off_threshold_curve.csv")
     events = _read_csv(run_dir / "risk_off_oos_events.csv")
     bootstrap = _read_csv(run_dir / "risk_off_bootstrap_differences.csv")
+    multiclass_probabilities = _read_csv(
+        run_dir / "multiclass_oos_probabilities.csv"
+    )
+    multiclass_metrics = _read_csv(run_dir / "multiclass_metrics_by_fold.csv")
+    multiclass_bootstrap = _read_csv(run_dir / "multiclass_class_bootstrap.csv")
     ablation = _read_csv(run_dir / "downside_feature_ablation.csv")
     missed = _read_csv(run_dir / "missed_downside_events.csv")
     false_positive = _read_csv(run_dir / "false_positive_events.csv")
@@ -248,6 +292,35 @@ def build_downside_report(run_dir: str | Path) -> Path:
     _plot_threshold_curves(curve, figures)
     _plot_reliability(events, figures)
     _plot_fold_metrics(metrics, figures)
+    _plot_bear_bootstrap(multiclass_bootstrap, figures)
+
+    multiclass_summary = pd.DataFrame()
+    if not multiclass_metrics.empty:
+        multiclass_summary = multiclass_metrics.groupby(
+            ["model", "horizon"],
+            as_index=False,
+        )[
+            [
+                "macro_f1",
+                "balanced_accuracy",
+                "recall_bear",
+                "recall_stress",
+                "brier",
+                "ece",
+            ]
+        ].mean()
+    bear_bootstrap = (
+        multiclass_bootstrap[
+            (multiclass_bootstrap["class"] == "Bear")
+            & (
+                multiclass_bootstrap["metric"].isin(
+                    ["recall", "precision", "f1", "pr_auc", "brier"]
+                )
+            )
+        ]
+        if not multiclass_bootstrap.empty
+        else pd.DataFrame()
+    )
 
     summary_columns = [
         column
@@ -284,6 +357,28 @@ def build_downside_report(run_dir: str | Path) -> Path:
         markdown_table(summary[summary_columns], max_rows=30)
         if not summary.empty
         else "_not_available_",
+        "",
+        "### Xác suất đầy đủ và nhận diện Bear",
+        "",
+        f"Artifact `multiclass_oos_probabilities.csv` có {len(multiclass_probabilities)} "
+        "dòng OOS. Mỗi dòng lưu đủ xác suất raw và temperature-calibrated cho "
+        "`Bull/Sideway/Bear/Stress`, actual/predicted class, xác suất Risk-off "
+        "baseline/candidate, threshold và alert. Các target downside còn lại là nhãn "
+        "nghiên cứu, không được trình bày như xác suất nếu chưa fit head riêng.",
+        "",
+        markdown_table(multiclass_summary, max_rows=20)
+        if not multiclass_summary.empty
+        else "_not_available_",
+        "",
+        markdown_table(bear_bootstrap, max_rows=20)
+        if not bear_bootstrap.empty
+        else "_not_available_",
+        "",
+        "![Bear-specific OOS](figures/bear_oos_diagnostics.png)",
+        "",
+        "**Nhận xét:** Bear được đọc từ `actual_class == Bear` và quyết định argmax "
+        "bốn lớp. Khoảng tin cậy dùng moving-block bootstrap trên development OOS; "
+        "không dùng legacy audit để tuning hoặc khẳng định cải thiện.",
         "",
         "## 3. Tác động của Risk-off head",
         "",

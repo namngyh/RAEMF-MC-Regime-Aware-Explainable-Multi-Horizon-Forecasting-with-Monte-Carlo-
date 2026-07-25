@@ -107,6 +107,26 @@ def test_required_artifact_schema(tmp_path):
             }
         ]
     ).to_csv(tmp_path / "risk_off_metrics_by_fold.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "date": "2020-01-02",
+                "horizon": 20,
+                "fold": 0,
+                "actual_class": "Bear",
+                "predicted_class": "Bear",
+                "raw_prob_bull": 0.10,
+                "raw_prob_sideway": 0.20,
+                "raw_prob_bear": 0.60,
+                "raw_prob_stress": 0.10,
+                "prob_bull": 0.15,
+                "prob_sideway": 0.20,
+                "prob_bear": 0.55,
+                "prob_stress": 0.10,
+                "candidate_risk_off_probability": 0.70,
+            }
+        ]
+    ).to_csv(tmp_path / "multiclass_oos_probabilities.csv", index=False)
     validate_downside_artifacts(tmp_path)
     (tmp_path / "report.md").unlink()
     with pytest.raises(AssertionError, match="missing required artifacts"):

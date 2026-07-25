@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from raemf_mc import CLASS_ORDER
 from raemf_mc.calibration.temperature_scaling import apply_temperature, fit_temperature
 from raemf_mc.config import write_config_snapshot
 from raemf_mc.data.loader import load_price_data, sha256_file
@@ -47,6 +48,7 @@ from raemf_mc.shadow.registry import REGISTRY_COLUMNS
 from raemf_mc.targets.downside_targets import create_downside_targets
 from raemf_mc.targets.regime_targets import create_multihorizon_targets
 from raemf_mc.tuning.objective import downside_candidate_is_admissible, downside_composite_loss
+from raemf_mc.uncertainty.block_bootstrap import bootstrap_multiclass_class_metrics
 from raemf_mc.validation.leakage_checks import (
     assert_no_future_feature_columns,
     assert_target_end_before_boundary,
@@ -72,6 +74,12 @@ REQUIRED_DOWNSIDE_ARTIFACTS = (
     "risk_off_threshold_curve.csv",
     "risk_off_selected_thresholds.json",
     "risk_off_bootstrap_differences.csv",
+    "multiclass_oos_probabilities.csv",
+    "multiclass_metrics_by_fold.csv",
+    "multiclass_class_metrics_by_fold.csv",
+    "multiclass_confusion_matrices.csv",
+    "multiclass_class_bootstrap.csv",
+    "legacy_multiclass_probabilities.csv",
     "downside_feature_ablation.csv",
     "downside_feature_importance.csv",
     "missed_downside_events.csv",
@@ -93,6 +101,12 @@ RUNTIME_BENCHMARK_COLUMNS = {
     "cache_status",
     "thread_count",
 }
+MULTICLASS_PROBABILITY_COLUMNS = [
+    f"prob_{class_name.lower()}" for class_name in CLASS_ORDER
+]
+RAW_MULTICLASS_PROBABILITY_COLUMNS = [
+    f"raw_prob_{class_name.lower()}" for class_name in CLASS_ORDER
+]
 
 
 def _git_sha() -> str:
@@ -139,6 +153,42 @@ def validate_downside_artifacts(run_dir: str | Path) -> None:
         raise AssertionError(
             f"risk_off_metrics_by_fold.csv invalid; missing={missing_metrics}, empty={metrics.empty}"
         )
+    probabilities = pd.read_csv(directory / "multiclass_oos_probabilities.csv")
+    required_probabilities = {
+        "date",
+        "horizon",
+        "fold",
+        "actual_class",
+        "predicted_class",
+        "candidate_risk_off_probability",
+        *MULTICLASS_PROBABILITY_COLUMNS,
+        *RAW_MULTICLASS_PROBABILITY_COLUMNS,
+    }
+    missing_probabilities = sorted(required_probabilities - set(probabilities.columns))
+    if probabilities.empty or missing_probabilities:
+        raise AssertionError(
+            "multiclass_oos_probabilities.csv invalid; "
+            f"missing={missing_probabilities}, empty={probabilities.empty}"
+        )
+    calibrated = probabilities[MULTICLASS_PROBABILITY_COLUMNS].to_numpy(dtype=float)
+    raw = probabilities[RAW_MULTICLASS_PROBABILITY_COLUMNS].to_numpy(dtype=float)
+    if (
+        not np.isfinite(calibrated).all()
+        or not np.isfinite(raw).all()
+        or (calibrated < 0).any()
+        or (calibrated > 1).any()
+        or (raw < 0).any()
+        or (raw > 1).any()
+        or not np.allclose(calibrated.sum(axis=1), 1.0, atol=1e-6)
+        or not np.allclose(raw.sum(axis=1), 1.0, atol=1e-6)
+    ):
+        raise AssertionError("Multiclass probabilities must be finite, bounded, and sum to one")
+    valid_classes = set(CLASS_ORDER)
+    if (
+        not set(probabilities["actual_class"].astype(str)).issubset(valid_classes)
+        or not set(probabilities["predicted_class"].astype(str)).issubset(valid_classes)
+    ):
+        raise AssertionError("Multiclass probability artifact contains unknown classes")
 
 
 def _run_directory(config: dict[str, Any]) -> Path:
@@ -182,7 +232,7 @@ def _fit_multiclass_baseline(
     config: dict[str, Any],
     seed: int,
     fixed_temperature: float | None = None,
-) -> tuple[np.ndarray, np.ndarray, dict[str, float], list[str]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, float], list[str]]:
     selected, _ = select_features(
         features,
         train,
@@ -195,8 +245,10 @@ def _fit_multiclass_baseline(
         features.loc[test, selected],
     )
     model = EBMForecaster(seed, **config["models"]["ebm"]).fit(x_train, target.iloc[train])
-    validation_probability = model.predict_proba(x_validation)
-    test_probability = model.predict_proba(x_test)
+    raw_validation_probability = model.predict_proba(x_validation)
+    raw_test_probability = model.predict_proba(x_test)
+    validation_probability = raw_validation_probability.copy()
+    test_probability = raw_test_probability.copy()
     if fixed_temperature is None:
         temperature, _, use_calibration = fit_temperature(validation_probability, target.iloc[validation])
     else:
@@ -206,10 +258,17 @@ def _fit_multiclass_baseline(
         validation_probability = apply_temperature(validation_probability, temperature)
         test_probability = apply_temperature(test_probability, temperature)
     test_metrics, _, _ = evaluate_predictions(target.iloc[test], test_probability, "multiclass_baseline", 0)
-    return validation_probability, test_probability, {
-        "macro_f1": float(test_metrics["macro_f1"]),
-        "temperature": float(temperature if use_calibration else 1.0),
-    }, selected
+    return (
+        validation_probability,
+        test_probability,
+        raw_validation_probability,
+        raw_test_probability,
+        {
+            "macro_f1": float(test_metrics["macro_f1"]),
+            "temperature": float(temperature if use_calibration else 1.0),
+        },
+        selected,
+    )
 
 
 def _prepare_binary_features(
@@ -231,6 +290,71 @@ def _prepare_binary_features(
         frame.loc[test, selected],
     )
     return x_train, x_validation, x_test, selected
+
+
+def _multiclass_probability_frame(
+    *,
+    dates: pd.Series,
+    actual_class: pd.Series,
+    calibrated_probability: np.ndarray,
+    raw_probability: np.ndarray,
+    candidate_probability: np.ndarray,
+    raw_candidate_probability: np.ndarray,
+    horizon: int,
+    fold: int,
+    baseline_threshold: float,
+    candidate_threshold: float,
+    baseline_temperature: float,
+    candidate_temperature: float,
+    forward_return: pd.Series,
+    future_mae: pd.Series,
+    evaluation_scope: str,
+) -> pd.DataFrame:
+    calibrated = np.asarray(calibrated_probability, dtype=float)
+    raw = np.asarray(raw_probability, dtype=float)
+    candidate = np.asarray(candidate_probability, dtype=float)
+    raw_candidate = np.asarray(raw_candidate_probability, dtype=float)
+    n_rows = len(dates)
+    if (
+        calibrated.shape != (n_rows, len(CLASS_ORDER))
+        or raw.shape != (n_rows, len(CLASS_ORDER))
+        or candidate.shape != (n_rows,)
+        or raw_candidate.shape != (n_rows,)
+    ):
+        raise ValueError("Probability output arrays do not align with the requested dates")
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(dates).to_numpy(),
+            "horizon": int(horizon),
+            "fold": int(fold),
+            "evaluation_scope": evaluation_scope,
+            "actual_class": actual_class.astype(str).to_numpy(),
+            "predicted_class": np.asarray(CLASS_ORDER, dtype=object)[
+                calibrated.argmax(axis=1)
+            ],
+        }
+    )
+    for index, class_name in enumerate(CLASS_ORDER):
+        frame[f"raw_prob_{class_name.lower()}"] = raw[:, index]
+        frame[f"prob_{class_name.lower()}"] = calibrated[:, index]
+    frame["raw_baseline_risk_off_probability"] = aggregate_multiclass_risk_off(raw)
+    frame["baseline_risk_off_probability"] = aggregate_multiclass_risk_off(calibrated)
+    frame["raw_candidate_risk_off_probability"] = raw_candidate
+    frame["candidate_risk_off_probability"] = candidate
+    frame["baseline_risk_off_threshold"] = float(baseline_threshold)
+    frame["candidate_risk_off_threshold"] = float(candidate_threshold)
+    frame["baseline_risk_off_alert"] = (
+        frame["baseline_risk_off_probability"] >= float(baseline_threshold)
+    ).astype(int)
+    frame["candidate_risk_off_alert"] = (
+        frame["candidate_risk_off_probability"] >= float(candidate_threshold)
+    ).astype(int)
+    frame["baseline_temperature"] = float(baseline_temperature)
+    frame["candidate_temperature"] = float(candidate_temperature)
+    frame["actual_risk_off"] = frame["actual_class"].isin(["Bear", "Stress"]).astype(int)
+    frame["forward_return"] = forward_return.to_numpy()
+    frame["future_mae"] = future_mae.to_numpy()
+    return frame
 
 
 def _weight_summary(
@@ -535,10 +659,11 @@ def _post_selection_legacy_audit(
     frozen_decision: dict[str, Any],
     config: dict[str, Any],
     seed: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Evaluate one locked configuration from 2021-04-02 without feeding selection."""
     metric_rows: list[dict[str, Any]] = []
     event_rows: list[pd.DataFrame] = []
+    probability_rows: list[pd.DataFrame] = []
     kind = str(frozen_decision["model_kind"])
     feature_group = str(frozen_decision["feature_group"])
     threshold_config = dict(frozen_decision["threshold_selection_config"])
@@ -613,8 +738,9 @@ def _post_selection_legacy_audit(
             sample_weight=weights,
             compute_importance=False,
         )
+        raw_candidate_probability = candidate_head.predict_proba(candidate_audit)
         candidate_probability = BinaryTemperatureCalibrator.apply(
-            candidate_head.predict_proba(candidate_audit),
+            raw_candidate_probability,
             float(frozen_decision["calibration_temperature_by_horizon"][str(horizon)]),
         )
 
@@ -635,7 +761,8 @@ def _post_selection_legacy_audit(
             baseline_train,
             targeted[f"target_{horizon}"].iloc[train].astype(str),
         )
-        multiclass_probability = baseline_model.predict_proba(baseline_audit)
+        raw_multiclass_probability = baseline_model.predict_proba(baseline_audit)
+        multiclass_probability = raw_multiclass_probability.copy()
         baseline_temperature = float(
             frozen_decision.get("baseline_calibration_temperature_by_horizon", {}).get(
                 str(horizon),
@@ -696,9 +823,37 @@ def _post_selection_legacy_audit(
                     }
                 )
             )
+        probability_rows.append(
+            _multiclass_probability_frame(
+                dates=common["dates"],
+                actual_class=targeted[f"target_{horizon}"].iloc[audit],
+                calibrated_probability=multiclass_probability,
+                raw_probability=raw_multiclass_probability,
+                candidate_probability=candidate_probability,
+                raw_candidate_probability=raw_candidate_probability,
+                horizon=horizon,
+                fold=-1,
+                baseline_threshold=float(
+                    frozen_decision["baseline_threshold_by_horizon"][str(horizon)]
+                ),
+                candidate_threshold=float(
+                    frozen_decision["threshold_by_horizon"][str(horizon)]
+                ),
+                baseline_temperature=baseline_temperature,
+                candidate_temperature=float(
+                    frozen_decision["calibration_temperature_by_horizon"][str(horizon)]
+                ),
+                forward_return=common["forward_return"],
+                future_mae=common["future_mae"],
+                evaluation_scope="post_selection_legacy_audit",
+            )
+        )
     return (
         pd.DataFrame(metric_rows),
         pd.concat(event_rows, ignore_index=True) if event_rows else pd.DataFrame(),
+        pd.concat(probability_rows, ignore_index=True)
+        if probability_rows
+        else pd.DataFrame(),
     )
 
 
@@ -803,6 +958,10 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
     fold_rows: list[dict[str, Any]] = []
     weight_rows: list[dict[str, Any]] = []
     selected_candidate_rows: list[dict[str, Any]] = []
+    multiclass_probability_rows: list[pd.DataFrame] = []
+    multiclass_metric_rows: list[dict[str, Any]] = []
+    multiclass_class_rows: list[pd.DataFrame] = []
+    multiclass_confusion_rows: list[pd.DataFrame] = []
     horizons = [int(value) for value in experiment["horizons"]]
     outer_folds = int(experiment["folds"])
     returns = np.log(targeted["close"] / targeted["close"].shift(1))
@@ -915,7 +1074,14 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
                 for frame in groups.values():
                     assert_no_future_feature_columns(list(frame.columns))
 
-                validation_multi, test_multi, multiclass_meta, baseline_features = _fit_multiclass_baseline(
+                (
+                    validation_multi,
+                    test_multi,
+                    _raw_validation_multi,
+                    raw_test_multi,
+                    multiclass_meta,
+                    baseline_features,
+                ) = _fit_multiclass_baseline(
                     base,
                     sub[f"target_{horizon}"].astype(str),
                     fold.train,
@@ -1002,13 +1168,14 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
                     params=dict(config["risk_off"]["models"].get(kind, {})),
                 ).fit(x_train, y_train, sample_weight=weights)
                 raw_validation = head.predict_proba(x_validation)
+                raw_test_candidate = head.predict_proba(x_test)
                 if frozen is None:
                     calibrator = BinaryTemperatureCalibrator().fit(
                         raw_validation,
                         sub[f"risk_off_{horizon}"].iloc[fold.validation].astype(int),
                     )
                     validation_candidate = calibrator.transform(raw_validation)
-                    test_candidate = calibrator.transform(head.predict_proba(x_test))
+                    test_candidate = calibrator.transform(raw_test_candidate)
                 else:
                     calibrator = BinaryTemperatureCalibrator()
                     calibrator.temperature = float(
@@ -1016,7 +1183,7 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
                     )
                     calibrator.used = not np.isclose(calibrator.temperature, 1.0)
                     validation_candidate = calibrator.transform(raw_validation)
-                    test_candidate = calibrator.transform(head.predict_proba(x_test))
+                    test_candidate = calibrator.transform(raw_test_candidate)
                 candidate_curve = threshold_sweep(
                     sub[f"risk_off_{horizon}"].iloc[fold.validation].astype(int),
                     validation_candidate,
@@ -1080,6 +1247,50 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
                     "fn_cost_multiplier": float(threshold_config["fn_cost_multiplier"]),
                     "fp_cost_multiplier": float(threshold_config["fp_cost_multiplier"]),
                 }
+                (
+                    multiclass_metrics,
+                    multiclass_classes,
+                    multiclass_confusion,
+                ) = evaluate_predictions(
+                    sub[f"target_{horizon}"].iloc[fold.test].astype(str),
+                    test_multi,
+                    "multiclass_ebm_baseline",
+                    horizon,
+                )
+                multiclass_metrics["fold"] = fold.fold
+                multiclass_metrics["evaluation_scope"] = (
+                    "nested_purged_development_oos"
+                )
+                multiclass_metric_rows.append(multiclass_metrics)
+                multiclass_classes.insert(2, "fold", fold.fold)
+                multiclass_classes["evaluation_scope"] = (
+                    "nested_purged_development_oos"
+                )
+                multiclass_class_rows.append(multiclass_classes)
+                multiclass_confusion.insert(2, "fold", fold.fold)
+                multiclass_confusion["evaluation_scope"] = (
+                    "nested_purged_development_oos"
+                )
+                multiclass_confusion_rows.append(multiclass_confusion)
+                multiclass_probability_rows.append(
+                    _multiclass_probability_frame(
+                        dates=common["dates"],
+                        actual_class=sub[f"target_{horizon}"].iloc[fold.test],
+                        calibrated_probability=test_multi,
+                        raw_probability=raw_test_multi,
+                        candidate_probability=test_candidate,
+                        raw_candidate_probability=raw_test_candidate,
+                        horizon=horizon,
+                        fold=fold.fold,
+                        baseline_threshold=baseline_selection.threshold,
+                        candidate_threshold=candidate_selection.threshold,
+                        baseline_temperature=multiclass_meta["temperature"],
+                        candidate_temperature=calibrator.temperature,
+                        forward_return=common["forward_return"],
+                        future_mae=common["future_mae"],
+                        evaluation_scope="nested_purged_development_oos",
+                    )
+                )
                 baseline_result = evaluate_model_risk(
                     probability=test_baseline,
                     threshold=baseline_selection.threshold,
@@ -1182,6 +1393,25 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
         fn_cost_multiplier=float(config["risk_off"]["threshold_selection"]["fn_cost_multiplier"]),
         fp_cost_multiplier=float(config["risk_off"]["threshold_selection"]["fp_cost_multiplier"]),
     )
+    multiclass_probabilities = pd.concat(
+        multiclass_probability_rows,
+        ignore_index=True,
+    )
+    multiclass_metrics_by_fold = pd.DataFrame(multiclass_metric_rows)
+    multiclass_class_metrics = pd.concat(
+        multiclass_class_rows,
+        ignore_index=True,
+    )
+    multiclass_confusion = pd.concat(
+        multiclass_confusion_rows,
+        ignore_index=True,
+    )
+    multiclass_bootstrap = bootstrap_multiclass_class_metrics(
+        multiclass_probabilities,
+        replicates=int(config["bootstrap"]["metric_replicates"]),
+        block_length=int(config["bootstrap"]["block_length"]),
+        seed=seed,
+    )
     peak_values = [
         int(value)
         for value in pd.DataFrame(runtime_rows).get("peak_rss", pd.Series(dtype=object))
@@ -1266,13 +1496,18 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
 
     legacy_metrics = pd.DataFrame()
     legacy_events = pd.DataFrame()
+    legacy_multiclass_probabilities = pd.DataFrame()
     if experiment.get("run_legacy_audit", False):
         with StageProfiler(
             runtime_rows,
             "post_selection_legacy_audit",
             thread_count=threads,
         ):
-            legacy_metrics, legacy_events = _post_selection_legacy_audit(
+            (
+                legacy_metrics,
+                legacy_events,
+                legacy_multiclass_probabilities,
+            ) = _post_selection_legacy_audit(
                 targeted,
                 technical,
                 downside_base,
@@ -1328,6 +1563,26 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
     pd.concat(threshold_rows, ignore_index=True).to_csv(run_dir / "risk_off_threshold_curve.csv", index=False)
     _write_json(run_dir / "risk_off_selected_thresholds.json", selected_thresholds)
     bootstrap.to_csv(run_dir / "risk_off_bootstrap_differences.csv", index=False)
+    multiclass_probabilities.to_csv(
+        run_dir / "multiclass_oos_probabilities.csv",
+        index=False,
+    )
+    multiclass_metrics_by_fold.to_csv(
+        run_dir / "multiclass_metrics_by_fold.csv",
+        index=False,
+    )
+    multiclass_class_metrics.to_csv(
+        run_dir / "multiclass_class_metrics_by_fold.csv",
+        index=False,
+    )
+    multiclass_confusion.to_csv(
+        run_dir / "multiclass_confusion_matrices.csv",
+        index=False,
+    )
+    multiclass_bootstrap.to_csv(
+        run_dir / "multiclass_class_bootstrap.csv",
+        index=False,
+    )
     pd.concat(ablation_rows, ignore_index=True).to_csv(run_dir / "downside_feature_ablation.csv", index=False)
     pd.concat(importance_rows, ignore_index=True).to_csv(run_dir / "downside_feature_importance.csv", index=False)
     pd.DataFrame(weight_rows).to_csv(run_dir / "sample_weight_distribution.csv", index=False)
@@ -1359,6 +1614,10 @@ def run_downside_experiment(data_path: str | Path, config: dict[str, Any]) -> Pa
     pd.DataFrame(columns=REGISTRY_COLUMNS).to_csv(run_dir / "forecast_registry.csv", index=False)
     legacy_metrics.to_csv(run_dir / "legacy_audit_metrics.csv", index=False)
     legacy_events.to_csv(run_dir / "legacy_audit_events.csv", index=False)
+    legacy_multiclass_probabilities.to_csv(
+        run_dir / "legacy_multiclass_probabilities.csv",
+        index=False,
+    )
     _write_json(run_dir / "frozen_decision.json", frozen_decision)
 
     runtime_frame = pd.DataFrame(runtime_rows)
