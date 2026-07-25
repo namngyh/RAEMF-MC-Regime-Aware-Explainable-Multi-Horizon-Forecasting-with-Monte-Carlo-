@@ -24,24 +24,6 @@ from raemf_mc.reporting.tables import markdown_table
 RESULTS_START = "<!-- RESULTS_START -->"
 RESULTS_END = "<!-- RESULTS_END -->"
 
-README_FIGURES = [
-    ("VN-Index và phân chia train, validation, test", "vnindex_va_phan_chia_du_lieu.png"),
-    ("Xác suất trạng thái Filtered HMM", "xac_suat_filtered_hmm.png"),
-    ("Biến động điều kiện EGARCH", "egarch_conditional_volatility.png"),
-    ("So sánh Brier score", "so_sanh_brier.png"),
-    ("So sánh macro F1", "so_sanh_macro_f1.png"),
-    ("Reliability diagram 20 phiên", "reliability_diagram_20.png"),
-    ("Fan chart Monte Carlo 20 phiên", "fan_chart_monte_carlo_20.png"),
-    ("Fan chart Monte Carlo 40 phiên", "fan_chart_monte_carlo_40.png"),
-    ("Fan chart Monte Carlo 60 phiên", "fan_chart_monte_carlo_60.png"),
-    ("Đường vốn ngoài mẫu", "backtest_equity_oos.png"),
-    ("Drawdown ngoài mẫu", "backtest_drawdown_oos.png"),
-    ("Tầm quan trọng đặc trưng RAEMF-MC", "feature_importance_raemf_mc_20.png"),
-    ("Kết quả ablation", "ablation_study.png"),
-    ("Khoảng tin cậy bootstrap của Brier", "bootstrap_forest_brier.png"),
-]
-
-
 def _write(path: Path, lines: list[str] | str) -> None:
     content = lines if isinstance(lines, str) else "\n".join(lines)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,29 +50,63 @@ def _figure_block(run_dir: Path, title: str, filename: str, prefix: str) -> list
 def _readme_results(run_dir: Path) -> str:
     metrics = pd.read_csv(run_dir / "metrics_by_model_horizon.csv")
     latest = pd.read_csv(run_dir / "predictions_latest.csv")
-    display_metrics = metrics[
-        ["model", "horizon", "macro_f1", "balanced_accuracy", "mcc", "brier", "log_loss", "ece", "recall_bear", "recall_stress"]
+    backtest = pd.read_csv(run_dir / "backtest_metrics.csv")
+    display_metrics = metrics.loc[
+        metrics["model"] == "RAEMF-MC",
+        [
+            "horizon",
+            "n_obs",
+            "macro_f1",
+            "balanced_accuracy",
+            "mcc",
+            "brier",
+            "log_loss",
+            "ece",
+            "recall_bull",
+            "recall_sideway",
+            "recall_bear",
+            "recall_stress",
+        ],
+    ]
+    display_backtest = backtest.loc[
+        backtest["model"] == "RAEMF-MC",
+        [
+            "model",
+            "cumulative_return",
+            "annualized_return",
+            "annualized_volatility",
+            "sharpe",
+            "sortino",
+            "max_drawdown",
+            "turnover",
+            "total_transaction_cost",
+            "average_exposure",
+        ],
     ]
     lines = [
-        "## Kết quả thực nghiệm mới nhất",
+        "## Evaluation classifier single-split",
         "",
-        "Bảng dưới đây được cập nhật tự động từ `outputs/latest/metrics_by_model_horizon.csv`.",
+        "Bảng này được cập nhật tự động từ artifact point-estimate gần nhất. "
+        "Đây là final TEST của protocol single-split; benchmark VB nhiều outer fold "
+        "được báo cáo riêng ở phần trên.",
         "",
         markdown_table(display_metrics, max_rows=80),
         "",
         f"**Nhận xét:** {overall_metric_interpretation(run_dir)}",
         "",
-        "### Dự báo triển khai mới nhất",
+        "### Xác suất triển khai gần nhất của run point-estimate",
         "",
         markdown_table(latest, max_rows=10),
         "",
         f"**Nhận xét:** {latest_interpretation(run_dir)}",
         "",
-        "## Hình ảnh và diễn giải",
+        "### Backtest final TEST",
         "",
+        markdown_table(display_backtest, max_rows=10),
+        "",
+        "Backtest dùng position trễ một phiên và chi phí giao dịch trong config. "
+        "Kết quả này không phải backtest riêng của VB scenario layer.",
     ]
-    for title, filename in README_FIGURES:
-        lines.extend(_figure_block(run_dir, title, filename, "outputs/latest/figures/"))
     return "\n".join(lines).rstrip()
 
 

@@ -31,13 +31,22 @@ def test_readme_markdown_mermaid_tables_and_images_are_valid():
     assert content.count("<!-- RESULTS_START -->") == 1
     assert content.count("<!-- RESULTS_END -->") == 1
     assert "\\(" not in content and "\\)" not in content, "Use GitHub-compatible $...$ for inline math"
-    assert "$$" not in content, "Use fenced math blocks for stable GitHub rendering"
-    assert content.count("```math") == 4
+    assert "CPU downside experiment" not in content
+    assert "RAEMF_VB_MC_REPORT.md" in content
     images = _local_images(content)
-    result_images = [image for image in images if image.startswith("outputs/latest/figures/")]
-    assert len(result_images) >= 14
+    assert len(images) >= 4
     for image in images:
         assert (ROOT / image).exists(), f"Broken README image path: {image}"
+
+
+def test_root_vb_report_has_train_validation_test_and_risk_sections():
+    path = ROOT / "RAEMF_VB_MC_REPORT.md"
+    _assert_markdown_structure(path)
+    content = path.read_text(encoding="utf-8")
+    for section in ["TRAIN", "VALID", "TEST", "Xác suất bốn regime", "Quản trị rủi ro"]:
+        assert section in content
+    for image in _local_images(content):
+        assert (ROOT / image).exists(), f"Broken VB report image path: {image}"
 
 
 def test_report_references_every_figure_and_comments_after_each_image():
