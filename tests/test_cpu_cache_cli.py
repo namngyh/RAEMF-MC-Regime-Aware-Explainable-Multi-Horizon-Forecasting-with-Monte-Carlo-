@@ -10,6 +10,7 @@ from raemf_mc.evaluation.downside_experiment import (
     REQUIRED_DOWNSIDE_ARTIFACTS,
     validate_downside_artifacts,
 )
+from raemf_mc.reporting.downside_report import _interrupted_runtime_rows
 from raemf_mc.runtime.cache import ArtifactCache, cache_key
 from raemf_mc.runtime.cpu import configure_cpu_runtime
 
@@ -110,3 +111,26 @@ def test_required_artifact_schema(tmp_path):
     (tmp_path / "report.md").unlink()
     with pytest.raises(AssertionError, match="missing required artifacts"):
         validate_downside_artifacts(tmp_path)
+
+
+def test_runtime_report_flags_likely_sleep_or_suspend():
+    runtime = pd.DataFrame(
+        [
+            {
+                "stage": "outer_fold",
+                "horizon": 20,
+                "fold": 0,
+                "wall_time": 5_670.0,
+                "cpu_time": 658.0,
+            },
+            {
+                "stage": "outer_fold",
+                "horizon": 20,
+                "fold": 1,
+                "wall_time": 1_235.0,
+                "cpu_time": 1_312.0,
+            },
+        ]
+    )
+    interrupted = _interrupted_runtime_rows(runtime)
+    assert interrupted[["horizon", "fold"]].to_records(index=False).tolist() == [(20, 0)]

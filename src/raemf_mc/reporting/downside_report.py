@@ -20,6 +20,7 @@ COLORS = {
     "multiclass_probability_sum": "#0072B2",
     "candidate_risk_off": "#D55E00",
 }
+WALL_CPU_INTERRUPTION_RATIO = 4.0
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
@@ -27,6 +28,17 @@ def _read_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path)
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return pd.DataFrame()
+
+
+def _interrupted_runtime_rows(runtime: pd.DataFrame) -> pd.DataFrame:
+    required = {"wall_time", "cpu_time"}
+    if not required.issubset(runtime.columns):
+        return pd.DataFrame()
+    return runtime.loc[
+        runtime["wall_time"]
+        > WALL_CPU_INTERRUPTION_RATIO * runtime["cpu_time"].clip(lower=1),
+        ["stage", "horizon", "fold", "wall_time", "cpu_time"],
+    ]
 
 
 def _style() -> None:
@@ -221,19 +233,16 @@ def build_downside_report(run_dir: str | Path) -> Path:
     thresholds = json.loads(
         (run_dir / "risk_off_selected_thresholds.json").read_text(encoding="utf-8")
     )
-    interrupted_runtime = (
-        runtime.loc[
-            runtime["wall_time"] > 10 * runtime["cpu_time"].clip(lower=1),
-            ["stage", "horizon", "fold", "wall_time", "cpu_time"],
-        ]
-        if {"wall_time", "cpu_time"}.issubset(runtime.columns)
-        else pd.DataFrame()
-    )
+    interrupted_runtime = _interrupted_runtime_rows(runtime)
     runtime_note = (
-        "Có stage có wall time lớn hơn 10 lần CPU time; số đo này có thể bao gồm "
+        f"Có stage có wall time lớn hơn {WALL_CPU_INTERRUPTION_RATIO:g} lần CPU time; "
+        "số đo này có thể bao gồm "
         "thời gian máy sleep/suspend hoặc idle kéo dài, nên không phải benchmark wall sạch."
         if not interrupted_runtime.empty
-        else "Không phát hiện stage có wall time lớn hơn 10 lần CPU time."
+        else (
+            "Không phát hiện stage có wall time lớn hơn "
+            f"{WALL_CPU_INTERRUPTION_RATIO:g} lần CPU time."
+        )
     )
 
     _plot_threshold_curves(curve, figures)
